@@ -35,34 +35,43 @@ def fitbit_setup():
     client = fitbit.Fitbit(client_key, client_secret, resource_owner_key=user_key, resource_owner_secret=user_secret)
     return client 
  
-def step_alert(fitbit_client, twil_client, daily_time, scheduler):
+def step_alert(fitbit_client, twil_client, daily_time, scheduler, msg_type):
     now = datetime.datetime.now()
     today = now.strftime("%Y-%m-%d")
     data = fitbit_client._COLLECTION_RESOURCE('activities', date=today)
     step_count = json.dumps(data["summary"]["steps"], indent=2)
 
-    t = dt.combine(dt.now() + datetime.timedelta(days=1), daily_time)
-    scheduler.enterabs(time.mktime(t.timetuple()), 1, step_alert, (fitbit_client, twil_client, daily_time, scheduler))
-    report_step_count(step_count, twil_client)
+    if msg_type == "near_day_end":
+        t = dt.combine(dt.now() + datetime.timedelta(days=1), near_day_end)
+    elif msg_type == "day_end": 
+        t = dt.combine(dt.now() + datetime.timedelta(days=1), day_end)
+    scheduler.enterabs(time.mktime(t.timetuple()), 1, step_alert, (fitbit_client, twil_client, daily_time, scheduler, msg_type))
+    report_step_count(step_count, twil_client, msg_type)
 
-def report_step_count(count, twil_client):
+def report_step_count(count, twil_client, msg_type):
     parser = ConfigParser.SafeConfigParser()
     parser.read('config.ini')
     target_phone = parser.get('Phone Numbers', 'TARGET_PHONE')
     twil_phone = parser.get('Phone Numbers', 'TWIL_PHONE')
 
-    gap = 10000 - int(count)
-    msg = "Today you've taken " + count + " steps. Only " + str(gap) + " more steps to reach 10K!"
+    if msg_type == "near_day_end":
+        gap = 10000 - int(count)
+        msg = "Today you've taken " + count + " steps. Only " + str(gap) + " more steps to reach 10K!"
+    elif msg_type == "day_end":
+        msg = "Your step count for today was " + count + " steps."
     twil_client.messages.create(to=target_phone, from_=twil_phone, body=msg)
 
 def main():
     twil_client = twilio_setup()
     fitbit_client = fitbit_setup()
-    daily_time = datetime.time(23) # 11 p.m.
+    near_day_end = datetime.time(23) # 11 p.m.
+    day_end = datetime.time(23, 59) # 11:59 p.m.
     scheduler = sched.scheduler(time.time, time.sleep)
 
-    first_time = dt.combine(dt.now(), daily_time)
-    scheduler.enterabs(time.mktime(first_time.timetuple()), 1, step_alert, (fitbit_client, twil_client, daily_time, scheduler))
+    near_day_end_time = dt.combine(dt.now(), near_day_end)
+    day_end_time = dt.combine(dt.now(), day_end)
+    scheduler.enterabs(time.mktime(near_day_end_time.timetuple()), 1, step_alert, (fitbit_client, twil_client, near_day_end, scheduler, "near_day_end"))
+    scheduler.enterabs(time.mktime(day_end_time.timetuple()), 1, step_alert, (fitbit_client, twil_client, day_end, scheduler, "day_end"))
     scheduler.run()
 
 main()
